@@ -4860,11 +4860,19 @@ This input is clamped to 0-3.3V, and is rated for -3V to +6V max. A small negati
        </attribute>
        <layout class="QGridLayout" name="gridLayout_46">
         <item row="0" column="0">
-         <widget class="QLabel" name="about_label">
+            <widget class="QPushButton" name="gamma_correction_button">
+            <property name="toolTip">
+                <string>Run Gamma Correction Script to Get Correct Bit Plane Intensities</string>
+            </property>
+            <property name="text">
+                <string>Run Gamma Correction</string>
+            </property>
+            </widget>
+         <!-- <widget class="QLabel" name="about_label">
           <property name="text">
            <string>About the software and Github link</string>
-          </property>
-         </widget>
+          </property> 
+         </widget> -->
         </item>
        </layout>
       </widget>

@@ -2,6 +2,7 @@ from collections import OrderedDict
 import guiSequence as seq
 import guiConfigIO as fileIO
 import calibrationPlot as plot
+from gamma_calibration import run_gamma_calibration
 from PyQt5 import QtGui, QtCore
 
 def initializeConfigModel(gui):
@@ -327,6 +328,8 @@ def initializeEvents(gui):
 
         gui.sync_analog_output_PWM_avg_slider.valueChanged.connect(lambda: gui.updateAnalogSync("PWM"))
         gui.sync_analog_output_current_avg_slider.valueChanged.connect(lambda: gui.updateAnalogSync("current"))
+
+        gui.gamma_correction_button.clicked.connect(lambda: run_gamma_calibration(gui, gui.sync_digital_low_sequence_table))
 
         sequenceEvents()
         outputChannelEvents()
