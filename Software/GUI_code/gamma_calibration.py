@@ -42,6 +42,8 @@ class CalibrateProjector(ABC):
         # configure measurement
         self.measurement_wavelength = wavelength
         self.instrum = self.getInstrument() if not debug else None
+        if self.instrum is not None:
+            self.instrum.wavelength = self.measurement_wavelength
     
     def createSequenceFile(self, level):
         with open(self.seq_filename, 'w') as file:
@@ -74,7 +76,9 @@ class CalibrateProjector(ABC):
 
     def getInstrument(self):
         try:
-            instrum = ThorlabsPM100USB('USB0::0x1313::0x8078::P0023944::INSTR')
+            theresa_device_id =  'USB0::4883::32888::P0015224::0::INSTR'
+            will_device_id = 'USB0::0x1313::0x8078::P0023944::INSTR'
+            instrum = ThorlabsPM100USB(theresa_device_id)
         except:
             logging.error('Could not connect to Thorlabs PM100D')
             raise Exception('Could not connect to Thorlabs PM100D')
@@ -173,7 +177,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     time.sleep(self.sleep_time)
 
                     # measure the power meter
-                    power = self.instrum.measure_power(wavelength=self.measurement_wavelength)
+                    power = self.instrum.power
 
                 # write the data out to a file
                 elapsed_time = time.time() - start_time
