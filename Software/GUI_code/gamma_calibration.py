@@ -76,7 +76,7 @@ class CalibrateProjector(ABC):
 
     def getInstrument(self):
         try:
-            theresa_device_id =  'USB0::4883::32888::P0015224::0::INSTR'
+            theresa_device_id ='USB0::4883::32888::P0015224::0::INSTR'
             will_device_id = 'USB0::0x1313::0x8078::P0023944::INSTR'
             instrum = ThorlabsPM100USB(theresa_device_id)
         except:
