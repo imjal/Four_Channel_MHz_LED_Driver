@@ -13,10 +13,16 @@ row_subsample = maximum_rows  #Only load the last segment of the table for very 
 n_sequence_files = 4 #Total number of sequence tables in Sync configuration
 
 def loadSequence(gui, widget, get_path=False):  # derived from - https://stackoverflow.com/questions/12608835/writing-a-qtablewidget-to-a-csv-or-xls
-    if get_path:
-        path = getSequencePath(gui, widget)
+    if get_path: 
+        path = get_path
     else:
         path = None
+    
+    # if get_path:
+    #     path = getSequencePath(gui, widget)
+    # else:
+    #     path = None
+
     if path is None:
         path = QtWidgets.QFileDialog.getOpenFileName(gui, 'Open File', '', 'CSV(*.csv)')[0] #If no path is specified, ask for valid path
 
