@@ -6,8 +6,6 @@ from matplotlib.gridspec import GridSpec
 import numpy as np
 import time
 from abc import ABC, abstractmethod
-
-
 import logging
 
 from simple_pid import PID
@@ -17,50 +15,62 @@ import guiSequence as seq
 
 
 class CalibrateProjector(ABC):
-    def __init__(self, starting_power, log_dir, data_dir, sleep_time=2, wavelength=660, threshold=0.01):
+    def __init__(self, starting_power, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
         # PID variables
         self.starting_power = starting_power
         self.sleep_time = sleep_time
         self.threshold = threshold
         
         # configure logging
-        self.log_dir = log_dir
-        self.data_dir = data_dir
-        os.makedirs(self.log_dir, exist_ok=True)
-        os.makedirs(self.data_dir, exist_ok=True)
-        self.data_filename = self.configureDataFile()
+        self.dirname = calibration_dir
+        os.makedirs(self.dirname, exist_ok=False)
+        self.configureLogger()
+
+        # configure PID data file
+        self.pid_data_filename = self.configurePIDDataFile()
+        self.plot_dirname = os.path.join(self.dirname, 'plots')
+        os.makedirs(self.plot_dirname, exist_ok=True)
+
+        # configure final measurement data file
+        self.final_data_filename = os.path.join(self.dirname, 'calibrated_control.csv')
+        with open(self.final_data_filename, 'w') as file:
+            file.write('Level,Control,Power\n')
 
         # configure measurement
         self.measurement_wavelength = wavelength
-        self.instrum = self.getInstrument()
+        self.instrum = self.getInstrument() if not debug else None
         
     
     def configureLogger(self):
-        log_filename = os.path.join(self.log_dir, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
+        log_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
         logging.basicConfig(filename=log_filename, level=logging.DEBUG,
                             format='%(asctime)s - %(levelname)s - %(message)s')
         logging.info(f'Begin Logging at {datetime.now()}')
 
 
-    def configureDataFile(self):
-        data_filename = os.path.join(self.data_dir, datetime.now().strftime('gamma_calibration_data_%Y%m%d_%H%M%S.csv'))
+    def configurePIDDataFile(self):
+        data_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_data_%Y%m%d_%H%M%S.csv'))
         with open(data_filename, 'w') as file:
-            file.write('Timestamp,Level,Power,Control\n')
+            file.write('Timestamp,Level,TimeElapsed,Power,SetPoint,P,I,D,Control\n')
         
         logging.info(f'PID data will be saved to {data_filename}')
         return data_filename
 
     def writePIDData(self, level, setpoint, time_elapsed, power, p, i, d, control):
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with open(self.data_filename, 'a') as file:
+        with open(self.pid_data_filename, 'a') as file:
             file.write(f'{timestamp},{level},{time_elapsed},{power},{setpoint},{p},{i},{d},{control}\n')
+
+    def writeControlPowerData(self, level, control, power):
+        with open(self.final_data_filename, 'a') as file:
+            file.write(f'{level},{control},{power}\n')
 
     def getInstrument(self):
         try:
             instrum = ThorlabsPM100USB('USB0::0x1313::0x8078::P0023944::INSTR')
         except:
             logging.error('Could not connect to Thorlabs PM100D')
-            return None
+            raise Exception('Could not connect to Thorlabs PM100D')
         return instrum
 
     @abstractmethod
@@ -120,8 +130,8 @@ class CalibrateProjector(ABC):
 
 class CalibrateEvenOdd8Bit(CalibrateProjector):
 
-    def __init__(self, starting_power, log_dir, data_dir, sleep_time=2, wavelength=660, debug=False):
-        super().__init__(starting_power, log_dir, data_dir, sleep_time, wavelength)
+    def __init__(self, starting_power, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
+        super().__init__(starting_power, calibration_dir, sleep_time=sleep_time, wavelength=wavelength, threshold=threshold, debug=debug)
 
         # PID variables
         self.debug = debug
@@ -171,17 +181,18 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     break
             
             # Save the figure in the data directory
-            self.fig.savefig(os.path.join(self.data_dir, f'gamma_calibration_{level}.png'))
+            self.writeControlPowerData(level, control, power)
+            self.fig.savefig(os.path.join(self.plot_dirname, f'gamma_calibration_{level}.png'))
             plt.close(self.fig)
             
 
 def run_gamma_calibration(gui, widget, debug=False):
     starting_power_at_128 = 130 # TODO: Must set in microwatts
-    log_dir = 'calibration_logs'
-    data_dir = 'calibration_data'
-    calibrator = CalibrateEvenOdd8Bit(starting_power_at_128, log_dir, data_dir, debug=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    calibration_dir = f'calibration_{timestamp}'
+
+    calibrator = CalibrateEvenOdd8Bit(starting_power_at_128, calibration_dir, debug=debug)
     calibrator.run_calibration(gui, widget)
 
 if __name__ == "__main__":
     run_gamma_calibration(None, None, debug=True)
-
