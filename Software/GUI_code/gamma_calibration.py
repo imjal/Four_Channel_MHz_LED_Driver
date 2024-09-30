@@ -26,6 +26,9 @@ class CalibrateProjector(ABC):
         os.makedirs(self.dirname, exist_ok=False)
         self.configureLogger()
 
+        # configure sequence file
+        self.seq_filename = os.path.join(self.dirname, 'sequence.csv')
+        
         # configure PID data file
         self.pid_data_filename = self.configurePIDDataFile()
         self.plot_dirname = os.path.join(self.dirname, 'plots')
@@ -39,7 +42,11 @@ class CalibrateProjector(ABC):
         # configure measurement
         self.measurement_wavelength = wavelength
         self.instrum = self.getInstrument() if not debug else None
-        
+    
+    def createSequenceFile(self, level):
+        with open(self.seq_filename, 'w') as file:
+            file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
+            file.write(f"1, {float(level/128)}, 70.1, 0.1\n")
     
     def configureLogger(self):
         log_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
@@ -157,9 +164,9 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 if self.debug:
                     power = float(200*np.sqrt(control))
                 else:
-                    # send the sequence to the device TODO: this part is not done yet
-                    path = "."
-                    seq.loadSequence(gui, widget, path) # load the sequence
+                    # send the sequence to the device
+                    self.createSequenceFile(level)
+                    seq.loadSequence(gui, widget, self.seq_filename) # load the sequence
                     gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
 
                     # wait for the sequence to load, and change, and measure
