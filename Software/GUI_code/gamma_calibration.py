@@ -45,10 +45,10 @@ class CalibrateProjector(ABC):
         if self.instrum is not None:
             self.instrum.wavelength = self.measurement_wavelength
     
-    def createSequenceFile(self, level):
+    def createSequenceFile(self, control):
         with open(self.seq_filename, 'w') as file:
             file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
-            file.write(f"1, {float(level/128)}, 70.1, 0.1\n")
+            file.write(f"1,{float(control)},100,1\n")
     
     def configureLogger(self):
         log_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
@@ -77,8 +77,8 @@ class CalibrateProjector(ABC):
     def getInstrument(self):
         try:
             theresa_device_id ='USB0::4883::32888::P0015224::0::INSTR'
-            will_device_id = 'USB0::0x1313::0x8078::P0023944::INSTR'
-            instrum = ThorlabsPM100USB(theresa_device_id)
+            will_device_id = 'USB0::0x1313::0x8078::P0015224::INSTR'
+            instrum = ThorlabsPM100USB(will_device_id)
         except:
             logging.error('Could not connect to Thorlabs PM100D')
             raise Exception('Could not connect to Thorlabs PM100D')
@@ -169,7 +169,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     power = float(200*np.sqrt(control))
                 else:
                     # send the sequence to the device
-                    self.createSequenceFile(level)
+                    self.createSequenceFile(control * 100) # sending in percentage
                     seq.loadSequence(gui, widget, self.seq_filename) # load the sequence
                     gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
 
@@ -177,7 +177,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     time.sleep(self.sleep_time)
 
                     # measure the power meter
-                    power = self.instrum.power
+                    power = self.instrum.power * 1000000 # convert to microwatts
 
                 # write the data out to a file
                 elapsed_time = time.time() - start_time
@@ -202,7 +202,7 @@ def run_gamma_calibration(gui, widget, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(starting_power_at_128, calibration_dir, debug=debug)
+    calibrator = CalibrateEvenOdd8Bit(starting_power_at_128, calibration_dir, debug=debug, sleep_time=5)
     calibrator.run_calibration(gui, widget)
 
 if __name__ == "__main__":
