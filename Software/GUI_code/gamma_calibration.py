@@ -45,9 +45,20 @@ class CalibrateProjector(ABC):
         if self.instrum is not None:
             self.instrum.wavelength = self.measurement_wavelength
     
-    def createSequenceFile(self, control):
+    def createSequenceFile(self, control, mode='RGB'):
+        if mode== 'RGB': 
+            mapping = [6, 4, 2]
+        else: 
+            mapping = [5, 3, 1]
         with open(self.seq_filename, 'w') as file:
             file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
+
+            for i in range(3):
+                for j in range(8):
+                    if i == 0:
+                        file.write(f"1, {float(level/128)}, 70.1, {mapping[i]}\n")
+                    else:
+                        file.write(f"1, 0, 70.1, {mapping[i]}\n")
             file.write(f"1,{float(control)},100,1\n")
     
     def configureLogger(self):
@@ -169,8 +180,9 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     power = float(200*np.sqrt(control))
                 else:
                     # send the sequence to the device
-                    self.createSequenceFile(control * 100) # sending in percentage
-                    seq.loadSequence(gui, widget, self.seq_filename) # load the sequence
+                    self.createSequenceFile(level)
+                    seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename) # load the sequence
+                    seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename) # load the sequence
                     gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
 
                     # wait for the sequence to load, and change, and measure
@@ -202,8 +214,8 @@ def run_gamma_calibration(gui, widget, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(starting_power_at_128, calibration_dir, debug=debug, sleep_time=5)
-    calibrator.run_calibration(gui, widget)
+    calibrator = CalibrateEvenOdd8Bit(starting_power_at_128, calibration_dir, debug=debug)
+    calibrator.run_calibration(gui)
 
 if __name__ == "__main__":
     run_gamma_calibration(None, None, debug=True)

@@ -61,7 +61,7 @@ class Ui(QtWidgets.QMainWindow):
         self.sync_model = guiMapper.initializeSyncModel(self)
         self.main_model = guiMapper.initializeMainModel(self)
         self.intensity_delay_timer = timer() #Timer for delaying updates from intensity dial
-
+        print("we arrived at 64")
         # Initialize status dictionaries
         self.status_dynamic_dict = OrderedDict([("Channel", 0),
                                     ("PWM", 0),
@@ -92,7 +92,7 @@ class Ui(QtWidgets.QMainWindow):
             for button in range(4):
                 if channel <= button:
                     self.config_model["Channel" + str(channel)][button].setVisible(False)
-
+        # self.show()
         # Assign events to widgets
         self.ser = driverUSB.usbSerial(self)
         guiMapper.initializeEvents(self)
@@ -465,10 +465,12 @@ class Ui(QtWidgets.QMainWindow):
             self.config_model["LED" + str(led_number+1)]["Current Limit"].setWhatsThis(str(value))
 
     def getAdcCurrentLimit(self, led_number):
-        try:
-            return int(self.config_model["LED" + str(led_number+1)]["Current Limit"].whatsThis())
-        except ValueError:
-            return 0.01
+        # try:
+        return int(self.config_model["LED" + str(led_number+1)]["Current Limit"].whatsThis())
+        # except ValueError:
+        #     raise 
+        #     import pdb; pdb.set_trace()
+        #     return 0.01
 
     # Define function to import external files when using PyInstaller - https://stackoverflow.com/questions/37888581/pyinstaller-ui-files-filenotfounderror-errno-2-no-such-file-or-directory/37920111#37920111
     def resourcePath(self, relative_path):

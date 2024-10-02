@@ -66,6 +66,10 @@ class usbSerial(QtWidgets.QWidget): #Implementation based on: https://stackoverf
 
     #https://forum.pjrc.com/threads/25295-Automatically-find-a-Teensy-Board-with-Python-and-PySerial
     def getDriverPort(self, on_boot = False):
+        # A = list(QSerialPortInfo.availablePorts())
+        # B = [ self.getPortInfo(port) for port in A]
+        # print(B)
+        # import pdb; pdb.set_trace()
         for self.port in list(QSerialPortInfo.availablePorts()):
             port_info = self.getPortInfo(self.port)
             if port_info["Vendor"] == VENDOR_ID and port_info["Product"] == PRODUCT_ID: #Search for COM ports that have correct vendor and product IDs
@@ -513,6 +517,7 @@ class usbSerial(QtWidgets.QWidget): #Implementation based on: https://stackoverf
                 status_list[2] = current
                 status_list[3] = mode
                 status_list[5] = widgetIndex(self.gui.main_model["Control"])
+                print(status_list)
                 status_list = struct.pack("<BHHB??HHHHH", *status_list)
                 self.sendWithoutReply(status_list, True, 0)
 
