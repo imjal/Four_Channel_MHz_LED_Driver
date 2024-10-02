@@ -61,7 +61,6 @@ class Ui(QtWidgets.QMainWindow):
         self.sync_model = guiMapper.initializeSyncModel(self)
         self.main_model = guiMapper.initializeMainModel(self)
         self.intensity_delay_timer = timer() #Timer for delaying updates from intensity dial
-        print("we arrived at 64")
         # Initialize status dictionaries
         self.status_dynamic_dict = OrderedDict([("Channel", 0),
                                     ("PWM", 0),

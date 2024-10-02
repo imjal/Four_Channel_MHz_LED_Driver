@@ -162,7 +162,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         self.levels = levels
         self.set_points = [self.starting_power * level / 128 for level in levels]
 
-    def run_calibration(self, gui, widget):
+    def run_calibration(self, gui):
         for i, level in enumerate(self.levels):
             self.setUpPlot(level, self.set_points[i])
 
