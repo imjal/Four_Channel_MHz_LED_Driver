@@ -9,7 +9,9 @@ from abc import ABC, abstractmethod
 import logging
 
 from simple_pid import PID
-from pymeasure.instruments.thorlabs import ThorlabsPM100USB
+# from pymeasure.instruments.thorlabs import ThorlabsPM100USB
+import pyvisa
+from ThorlabsPM100 import ThorlabsPM100
 
 import guiSequence as seq
 
@@ -43,23 +45,22 @@ class CalibrateProjector(ABC):
         self.measurement_wavelength = wavelength
         self.instrum = self.getInstrument() if not debug else None
         if self.instrum is not None:
-            self.instrum.wavelength = self.measurement_wavelength
+            self.instrum.sense.correction.wavelength = self.measurement_wavelength
     
-    def createSequenceFile(self, control, mode='RGB'):
-        if mode== 'RGB': 
+    def createSequenceFile(self, control, level, mode='RGB'):
+        if mode == 'RGB':
             mapping = [6, 4, 2]
         else: 
             mapping = [5, 3, 1]
         with open(self.seq_filename, 'w') as file:
             file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
 
-            for i in range(3):
-                for j in range(8):
-                    if i == 0:
-                        file.write(f"1, {float(level/128)}, 70.1, {mapping[i]}\n")
+            for j in range(8):
+                for i in range(3):
+                    if i == 0 and j == level:
+                        file.write(f"1, {float(control * 100)}, 70.1, {mapping[i]}\n")
                     else:
-                        file.write(f"1, 0, 70.1, {mapping[i]}\n")
-            file.write(f"1,{float(control)},100,1\n")
+                        file.write(f"1, 0, 70.1, {mapping[i]}\n") # set other rows to 0
     
     def configureLogger(self):
         log_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
@@ -87,9 +88,15 @@ class CalibrateProjector(ABC):
 
     def getInstrument(self):
         try:
-            theresa_device_id ='USB0::4883::32888::P0015224::0::INSTR'
-            will_device_id = 'USB0::0x1313::0x8078::P0015224::INSTR'
-            instrum = ThorlabsPM100USB(will_device_id)
+            # theresa_device_id ='USB0::4883::32888::P0015224::0::INSTR'
+            # will_device_id = 'USB0::0x1313::0x8078::P0015224::INSTR'
+            # instrum = ThorlabsPM100USB(will_device_id)
+
+            rm = pyvisa.ResourceManager()
+            inst = rm.open_resource('USB0::0x1313::0x8078::P0015224::INSTR',
+                                    timeout=1)
+            instrum = ThorlabsPM100(inst=inst)
+            instrum.sense.average.count = 100 # take an average measurement over 100 samples
         except:
             logging.error('Could not connect to Thorlabs PM100D')
             raise Exception('Could not connect to Thorlabs PM100D')
@@ -180,7 +187,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     power = float(200*np.sqrt(control))
                 else:
                     # send the sequence to the device
-                    self.createSequenceFile(level)
+                    self.createSequenceFile(control, i)
                     seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename) # load the sequence
                     seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename) # load the sequence
                     gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
@@ -189,7 +196,8 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     time.sleep(self.sleep_time)
 
                     # measure the power meter
-                    power = self.instrum.power * 1000000 # convert to microwatts
+                    power = self.instrum.read * 1000000 # convert to microwatts
+                    print(control, power, self.set_points[i])
 
                 # write the data out to a file
                 elapsed_time = time.time() - start_time
@@ -210,7 +218,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             
 
 def run_gamma_calibration(gui, widget, debug=False):
-    starting_power_at_128 = 130 # TODO: Must set in microwatts
+    starting_power_at_128 = 213 # TODO: Must set in microwatts
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
