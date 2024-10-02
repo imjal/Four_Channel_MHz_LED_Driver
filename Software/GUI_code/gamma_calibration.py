@@ -168,7 +168,10 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
             # configure PID to the settings in simulation, set the set_point to the intended power level
             div_fact = np.clip(2**(i-1), 1, None)
-            pid = PID(0.00139/div_fact, 0.2/div_fact, 0.00000052/div_fact, setpoint=self.set_points[i], sample_time=None)  # works in microwatts
+            # old PID settings, not converging fast enough due to characteristics of the percentages
+            # pid = PID(0.00139/div_fact, 0.2/div_fact, 0.00000052/div_fact, setpoint=self.set_points[i], sample_time=None)  # works in microwatts
+            # converges in 8 iterations
+            pid = PID(0.00139, 0.4 * (2**level), 0.00000052, setpoint=power, sample_time=None)
             pid.output_limits = (0, 1)
 
             start_time = time.time()
@@ -177,7 +180,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 control = pid(power, dt=0.01)
                 # send control level to the driver
                 if self.debug:
-                    power = float(200*np.sqrt(control))
+                    power = float(250/(2**level)*np.sqrt(control))
                 else:
                     # send the sequence to the device
                     self.createSequenceFile(level)
@@ -210,7 +213,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             
 
 def run_gamma_calibration(gui, widget, debug=False):
-    starting_power_at_128 = 130 # TODO: Must set in microwatts
+    starting_power_at_128 = 213 # TODO: Must set in microwatts
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
