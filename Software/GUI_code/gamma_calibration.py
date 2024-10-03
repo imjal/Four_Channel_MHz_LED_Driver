@@ -7,6 +7,7 @@ import numpy as np
 import time
 from abc import ABC, abstractmethod
 import logging
+import tkinter as tk
 
 from simple_pid import PID
 # from pymeasure.instruments.thorlabs import ThorlabsPM100USB
@@ -15,6 +16,11 @@ from ThorlabsPM100 import ThorlabsPM100
 
 import guiSequence as seq
 
+
+def _from_rgb(rgb):
+    """translates an rgb tuple of int to a tkinter friendly color code
+    """
+    return "#%02x%02x%02x" % rgb
 
 class CalibrateProjector(ABC):
     def __init__(self, calibration_dir, sleep_time=3, wavelength=660, threshold=0.01, debug=False):
@@ -172,11 +178,12 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         levels = [2**i for i in range(8)]
         levels.reverse()
         self.levels = levels
-        self.max_powers = self.grab_all_max_powers(gui) # what do we want the max led intensity to be?
-        print(self.max_powers)
 
 
     def run_calibration(self, gui, start_led=0, start_level=0):
+        self.max_powers = None if self.debug else self.grab_all_max_powers(gui) # what do we want the max led intensity to be?
+        print(self.max_powers)
+
         # for led in range(start_led, 6):
         for led in [4, 5]:
             if self.instrum is not None:
@@ -263,9 +270,58 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             for i in range(6):
                 file.write(f'{i},{max_powers[i]}\n')
         return max_powers
+    
 
+    def run_gamma_check(self, gui, even_filename, odd_filename, step_size=10):
 
-def run_gamma_calibration(gui, widget, debug=False):
+        def record_power(control):
+            power = 0 if self.debug else self.instrum.read * 1000000.0
+            with open(self.gamma_check_power_filename, 'a') as file:
+                file.write(f'{control},{power},\n')
+
+        for led in [0, 3, 4, 5]:
+            
+            # Opening another window, does not work with the GUI. 
+            # if not self.debug: 
+            #     filename = even_filename if led < 3 else odd_filename
+            #     seq.loadSequence(gui, gui.sync_digital_low_sequence_table, filename) # load the sequence
+            #     seq.loadSequence(gui, gui.sync_digital_high_sequence_table, filename) # load the sequence
+            #     gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
+
+            self.gamma_check_power_filename = os.path.join(self.dirname, f'gamma_check_{led}.csv')
+            with open(self.gamma_check_power_filename, 'w') as file:
+                file.write('Control,Power\n')
+
+            # Create main window
+            root = tk.Tk()
+            root.attributes("-fullscreen", True)  
+            root.bind("<F11>", lambda event: root.attributes("-fullscreen",
+                                                not root.attributes("-fullscreen")))
+            root.bind("<Escape>", lambda event: root.attributes("-fullscreen", False))
+            # root.geometry("500x500+200+200")
+            root.title("Gamma Calibration Screen")
+            root.resizable(width = False, height = False)
+
+            def get_colour(index):
+                colours = [_from_rgb(tuple([i if j == index else 0 for j in range(3)])) for i in range(0, 256, step_size)]
+                values = [tuple([i if j == index else 0 for j in range(3)]) for i in range(0, 256, step_size)]
+                while True:
+                    for c, v in zip(colours, values):
+                        yield c, v
+            def start():
+                color, value = next(colour_getter)
+                root.configure(background=color) # set the colour to the next colour generated
+                print(value)
+                record_power(value[led % 3])
+                root.after(self.sleep_time * 1000, start) # unit is milliseconds
+            
+            colour_getter = get_colour(led % 3)
+            startButton = tk.Button(root,text="START",command=start)
+            startButton.pack()
+
+            root.mainloop()
+
+def run_gamma_calibration(gui, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
@@ -273,12 +329,16 @@ def run_gamma_calibration(gui, widget, debug=False):
     calibrator.run_calibration(gui, start_led=5)
 
 
-# def run_gamma_check(gui, debug=False):
-#     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-#     calibration_dir = f'calibration_{timestamp}'
-#
-#     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.01)
-#     calibrator.run_gamma_check(gui, channel)
+def run_gamma_check(gui, debug=True):
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    calibration_dir = f'calibration_{timestamp}'
+
+    even_filename = './sequence_files/rgb_even.csv'
+    odd_filename = './sequence_files/ocv_odd.csv'
+
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
+    calibrator.run_gamma_check(gui, even_filename, odd_filename)
 
 if __name__ == "__main__":
-    run_gamma_calibration(None, None, debug=True)
+    # run_gamma_calibration(None, debug=True)
+    run_gamma_check(None, debug=False)
