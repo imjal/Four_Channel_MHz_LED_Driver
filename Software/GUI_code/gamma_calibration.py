@@ -17,9 +17,8 @@ import guiSequence as seq
 
 
 class CalibrateProjector(ABC):
-    def __init__(self, starting_power, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
+    def __init__(self, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
         # PID variables
-        self.starting_power = starting_power
         self.sleep_time = sleep_time
         self.threshold = threshold
 
@@ -60,9 +59,9 @@ class CalibrateProjector(ABC):
             for j in range(8):
                 for i in range(3):
                     if i == led and j == level:
-                        file.write(f"1, {float(control * 100)}, 70.1, {mapping[i]}\n")
+                        file.write(f"1, {float(control * 100)}, 100, {mapping[i]}\n")
                     else:
-                        file.write(f"1, 0, 70.1, {mapping[i]}\n") # set other rows to 0
+                        file.write(f"1, 0, 100, {mapping[i]}\n") # set other rows to 0
     
     def configureLogger(self):
         log_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
@@ -107,6 +106,11 @@ class CalibrateProjector(ABC):
     @abstractmethod
     def run_calibration(self, gui):
         pass
+
+    # def run_gamma_check(self, gui, channel):
+    #
+    #     self.sendSequenceTable()
+
 
     def setUpPlot(self, led, level, setpoint):
         plt.ion()
@@ -161,8 +165,8 @@ class CalibrateProjector(ABC):
 
 class CalibrateEvenOdd8Bit(CalibrateProjector):
 
-    def __init__(self, gui, starting_power, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
-        super().__init__(starting_power, calibration_dir, sleep_time=sleep_time, wavelength=wavelength, threshold=threshold, debug=debug)
+    def __init__(self, gui, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
+        super().__init__(calibration_dir, sleep_time=sleep_time, wavelength=wavelength, threshold=threshold, debug=debug)
 
         # PID variables
         self.debug = debug
@@ -174,7 +178,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
 
     def run_calibration(self, gui):
-        for led in range(6):
+        for led in range(3, 6):
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             set_points = [self.max_powers[led] * level/128 for level in self.levels]
@@ -186,7 +190,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 # old PID settings, not converging fast enough due to characteristics of the percentages
                 # pid = PID(0.00139/div_fact, 0.2/div_fact, 0.00000052/div_fact, setpoint=self.set_points[i], sample_time=None)  # works in microwatts
                 # converges in 8 iterations
-                pid = PID(0.00139, 0.3 * (2**i), 0.00000052, setpoint=set_points[i], sample_time=None)
+                pid = PID(0.00139, 0.2 * (2**i), 0.00000052, setpoint=set_points[i], sample_time=None)
                 pid.output_limits = (0, 1)
 
                 start_time = time.time()
@@ -222,7 +226,8 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
                     itr = itr + 1
                     # stop the pid loop if the power is within the signficant digits of the settings
-                    if abs(pid.setpoint - power) < 10**(-i-1) or itr > 250:
+                    # self.threshold = 10**(-i-1)
+                    if abs(pid.setpoint - power) < self.threshold or itr > 250:
                         logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
                         break
 
@@ -261,12 +266,19 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
 
 def run_gamma_calibration(gui, widget, debug=False):
-    starting_power_at_128 = 213.0 # TODO: Must set in microwatts
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(gui, starting_power_at_128, calibration_dir, debug=debug, threshold=0.01)
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.01)
     calibrator.run_calibration(gui)
+
+
+# def run_gamma_check(gui, debug=False):
+#     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+#     calibration_dir = f'calibration_{timestamp}'
+#
+#     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.01)
+#     calibrator.run_gamma_check(gui, channel)
 
 if __name__ == "__main__":
     run_gamma_calibration(None, None, debug=True)
