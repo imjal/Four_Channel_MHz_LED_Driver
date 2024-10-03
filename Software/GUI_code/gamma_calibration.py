@@ -17,7 +17,7 @@ import guiSequence as seq
 
 
 class CalibrateProjector(ABC):
-    def __init__(self, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
+    def __init__(self, calibration_dir, sleep_time=3, wavelength=660, threshold=0.01, debug=False):
         # PID variables
         self.sleep_time = sleep_time
         self.threshold = threshold
@@ -92,12 +92,11 @@ class CalibrateProjector(ABC):
             # theresa_device_id ='USB0::4883::32888::P0015224::0::INSTR'
             # will_device_id = 'USB0::0x1313::0x8078::P0015224::INSTR'
             # instrum = ThorlabsPM100USB(will_device_id)
-
             rm = pyvisa.ResourceManager()
             inst = rm.open_resource('USB0::0x1313::0x8078::P0015224::INSTR',
                                     timeout=1)
             instrum = ThorlabsPM100(inst=inst)
-            instrum.sense.average.count = 100 # take an average measurement over 100 samples
+            instrum.sense.average.count = 500 # take an average measurement over 100 samples
         except:
             logging.error('Could not connect to Thorlabs PM100D')
             raise Exception('Could not connect to Thorlabs PM100D')
@@ -177,12 +176,13 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         print(self.max_powers)
 
 
-    def run_calibration(self, gui):
-        for led in range(3, 6):
+    def run_calibration(self, gui, start_led=0, start_level=0):
+        # for led in range(start_led, 6):
+        for led in [4, 5]:
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             set_points = [self.max_powers[led] * level/128 for level in self.levels]
-            for i, level in enumerate(self.levels):
+            for i, level in enumerate(self.levels[start_level:]):
                 self.setUpPlot(led, level, set_points[i])
 
                 # configure PID to the settings in simulation, set the set_point to the intended power level
@@ -227,7 +227,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     itr = itr + 1
                     # stop the pid loop if the power is within the signficant digits of the settings
                     # self.threshold = 10**(-i-1)
-                    if abs(pid.setpoint - power) < self.threshold or itr > 250:
+                    if abs(pid.setpoint - power) < self.threshold or itr > 250 or power < 1.75:
                         logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
                         break
 
@@ -269,8 +269,8 @@ def run_gamma_calibration(gui, widget, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.01)
-    calibrator.run_calibration(gui)
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
+    calibrator.run_calibration(gui, start_led=5)
 
 
 # def run_gamma_check(gui, debug=False):
