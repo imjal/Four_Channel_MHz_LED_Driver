@@ -22,6 +22,9 @@ class CalibrateProjector(ABC):
         self.starting_power = starting_power
         self.sleep_time = sleep_time
         self.threshold = threshold
+
+        self.leds = ['R', 'G', 'B', 'O', 'C', 'V']
+        self.peak_wavelengths = [660, 550, 450, 590, 510, 410]
         
         # configure logging
         self.dirname = calibration_dir
@@ -39,15 +42,14 @@ class CalibrateProjector(ABC):
         # configure final measurement data file
         self.final_data_filename = os.path.join(self.dirname, 'calibrated_control.csv')
         with open(self.final_data_filename, 'w') as file:
-            file.write('Level,Control,Power\n')
+            file.write('LED,Level,Control,Power\n')
 
         # configure measurement
         self.measurement_wavelength = wavelength
         self.instrum = self.getInstrument() if not debug else None
-        if self.instrum is not None:
-            self.instrum.sense.correction.wavelength = self.measurement_wavelength
+
     
-    def createSequenceFile(self, control, level, mode='RGB'):
+    def createSequenceFile(self, led, control, level, mode='RGB'):
         if mode == 'RGB':
             mapping = [6, 4, 2]
         else: 
@@ -57,7 +59,7 @@ class CalibrateProjector(ABC):
 
             for j in range(8):
                 for i in range(3):
-                    if i == 0 and j == level:
+                    if i == led and j == level:
                         file.write(f"1, {float(control * 100)}, 70.1, {mapping[i]}\n")
                     else:
                         file.write(f"1, 0, 70.1, {mapping[i]}\n") # set other rows to 0
@@ -82,9 +84,9 @@ class CalibrateProjector(ABC):
         with open(self.pid_data_filename, 'a') as file:
             file.write(f'{timestamp},{level},{time_elapsed},{power},{setpoint},{p},{i},{d},{control}\n')
 
-    def writeControlPowerData(self, level, control, power):
+    def writeControlPowerData(self, led, level, control, power):
         with open(self.final_data_filename, 'a') as file:
-            file.write(f'{level},{control},{power}\n')
+            file.write(f'{led},{level},{control},{power}\n')
 
     def getInstrument(self):
         try:
@@ -103,10 +105,10 @@ class CalibrateProjector(ABC):
         return instrum
 
     @abstractmethod
-    def run_calibration(self):
+    def run_calibration(self, gui):
         pass
 
-    def setUpPlot(self, level, setpoint):
+    def setUpPlot(self, led, level, setpoint):
         plt.ion()
         fig = plt.figure(layout='constrained')
         gs = GridSpec(4, 2, figure=fig)
@@ -140,7 +142,7 @@ class CalibrateProjector(ABC):
         timevd.set_ylabel('D')
         line6, = timevd.plot([], [], marker='o', linestyle='-', color='purple')
 
-        fig.suptitle(f'Gamma Calibration for Level {level}, Setpoint: {setpoint}')
+        fig.suptitle(f'Gamma Calibration for LED {led}  Level {level}, Setpoint: {setpoint}')
 
         self.fig = fig
 
@@ -159,7 +161,7 @@ class CalibrateProjector(ABC):
 
 class CalibrateEvenOdd8Bit(CalibrateProjector):
 
-    def __init__(self, starting_power, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
+    def __init__(self, gui, starting_power, calibration_dir, sleep_time=2, wavelength=660, threshold=0.01, debug=False):
         super().__init__(starting_power, calibration_dir, sleep_time=sleep_time, wavelength=wavelength, threshold=threshold, debug=debug)
 
         # PID variables
@@ -167,65 +169,103 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         levels = [2**i for i in range(8)]
         levels.reverse()
         self.levels = levels
-        self.set_points = [self.starting_power * level / 128 for level in levels]
+        self.max_powers = self.grab_all_max_powers(gui) # what do we want the max led intensity to be?
+        print(self.max_powers)
+
 
     def run_calibration(self, gui):
-        for i, level in enumerate(self.levels):
-            self.setUpPlot(level, self.set_points[i])
+        for led in range(6):
+            if self.instrum is not None:
+                self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+            set_points = [self.max_powers[led] * level/128 for level in self.levels]
+            for i, level in enumerate(self.levels):
+                self.setUpPlot(led, level, set_points[i])
 
-            # configure PID to the settings in simulation, set the set_point to the intended power level
-            div_fact = np.clip(2**(i-1), 1, None)
-            # old PID settings, not converging fast enough due to characteristics of the percentages
-            # pid = PID(0.00139/div_fact, 0.2/div_fact, 0.00000052/div_fact, setpoint=self.set_points[i], sample_time=None)  # works in microwatts
-            # converges in 8 iterations
-            pid = PID(0.00139, 0.4 * (2**level), 0.00000052, setpoint=power, sample_time=None)
-            pid.output_limits = (0, 1)
+                # configure PID to the settings in simulation, set the set_point to the intended power level
+                div_fact = np.clip(2**(i-1), 1, None)
+                # old PID settings, not converging fast enough due to characteristics of the percentages
+                # pid = PID(0.00139/div_fact, 0.2/div_fact, 0.00000052/div_fact, setpoint=self.set_points[i], sample_time=None)  # works in microwatts
+                # converges in 8 iterations
+                pid = PID(0.00139, 0.3 * (2**i), 0.00000052, setpoint=set_points[i], sample_time=None)
+                pid.output_limits = (0, 1)
 
-            start_time = time.time()
-            power = 0
-            while True:
-                control = pid(power, dt=0.01)
-                # send control level to the driver
-                if self.debug:
-                    power = float(250/(2**level)*np.sqrt(control))
-                else:
-                    # send the sequence to the device
-                    self.createSequenceFile(control, i)
-                    seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename) # load the sequence
-                    seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename) # load the sequence
-                    gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
+                start_time = time.time()
+                power = 0.0
+                itr = 0
+                while True:
+                    control = pid(power, dt=0.01)
+                    # send control level to the driver
+                    if self.debug:
+                        power = float(250/(2**i)*np.sqrt(control))
+                    else:
+                        # send the sequence to the device
+                        if led > 2:
+                            self.createSequenceFile(led % 3, control, i, mode='OCV')
+                        else:
+                            self.createSequenceFile(led, control, i)
+                        seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename) # load the sequence
+                        seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename) # load the sequence
+                        gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
 
-                    # wait for the sequence to load, and change, and measure
-                    time.sleep(self.sleep_time)
+                        # wait for the sequence to load, and change, and measure
+                        time.sleep(self.sleep_time)
 
-                    # measure the power meter
-                    power = self.instrum.read * 1000000 # convert to microwatts
-                    print(control, power, self.set_points[i])
+                        # measure the power meter
+                        power = self.instrum.read * 1000000.0 # convert to microwatts
+                        print(control, power, set_points[i])
 
-                # write the data out to a file
-                elapsed_time = time.time() - start_time
-                p, intg, d = pid.components
-                self.writePIDData(level, self.set_points[i], elapsed_time, power, p, intg, d, control)
-                self.plotPIDData(elapsed_time, power, p, intg, d, control)
+                    # write the data out to a file
+                    elapsed_time = time.time() - start_time
+                    p, intg, d = pid.components
+                    self.writePIDData(level, set_points[i], elapsed_time, power, p, intg, d, control)
+                    self.plotPIDData(elapsed_time, power, p, intg, d, control)
 
+                    itr = itr + 1
+                    # stop the pid loop if the power is within the signficant digits of the settings
+                    if abs(pid.setpoint - power) < 10**(-i-1) or itr > 250:
+                        logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
+                        break
 
-                # stop the pid loop if the power is within 0.01 of the setpoint
-                if abs(pid.setpoint - power) < self.threshold:
-                    logging.info(f'Gamma calibration for level {level} complete - Control: {control} Power: {power}')
-                    break
-            
-            # Save the figure in the data directory
-            self.writeControlPowerData(level, control, power)
-            self.fig.savefig(os.path.join(self.plot_dirname, f'gamma_calibration_{level}.png'))
-            plt.close(self.fig)
-            
+                # Save the figure in the data directory
+                self.writeControlPowerData(led, level, control, power)
+                self.fig.savefig(os.path.join(self.plot_dirname, f'gamma_calibration_{led}_{level}.png'))
+                plt.close(self.fig)
+
+    def grab_all_max_powers(self, gui, percent_of_max=0.8):
+        max_powers = []
+
+        for led in range(6):
+            if self.instrum is not None:
+                self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+
+            if led > 2:
+                self.createSequenceFile(led % 3, 1,0, mode='OCV')
+            else:
+                self.createSequenceFile(led, 1, 0)
+            seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename)  # load the sequence
+            seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename)  # load the sequence
+            gui.ser.uploadSyncConfiguration()  # upload the sequence to the driver
+
+            # wait for the sequence to load, and change, and measure
+            time.sleep(self.sleep_time)
+
+            # measure the power meter
+            max_powers += [self.instrum.read * 1000000.0 * percent_of_max]  # convert to microwatts
+
+        max_power_data_file = os.path.join(self.dirname, 'max_power_data.csv')
+        with open(max_power_data_file, 'w') as file:
+            file.write('LED,Power\n')
+            for i in range(6):
+                file.write(f'{i},{max_powers[i]}\n')
+        return max_powers
+
 
 def run_gamma_calibration(gui, widget, debug=False):
-    starting_power_at_128 = 213 # TODO: Must set in microwatts
+    starting_power_at_128 = 213.0 # TODO: Must set in microwatts
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(starting_power_at_128, calibration_dir, debug=debug)
+    calibrator = CalibrateEvenOdd8Bit(gui, starting_power_at_128, calibration_dir, debug=debug, threshold=0.01)
     calibrator.run_calibration(gui)
 
 if __name__ == "__main__":
