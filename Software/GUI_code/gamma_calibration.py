@@ -185,7 +185,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         print(self.max_powers)
 
         # for led in range(start_led, 6):
-        for led in [4, 5]:
+        for led in [0]:
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             set_points = [self.max_powers[led] * level/128 for level in self.levels]
@@ -276,10 +276,13 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
         def record_power(control):
             power = 0 if self.debug else self.instrum.read * 1000000.0
+            print(f"{control}, {power}")
             with open(self.gamma_check_power_filename, 'a') as file:
                 file.write(f'{control},{power},\n')
 
-        for led in [0, 3, 4, 5]:
+        for led in [5]:
+            if self.instrum is not None:
+                self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             
             # Opening another window, does not work with the GUI. 
             # if not self.debug: 
@@ -294,7 +297,11 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
             # Create main window
             root = tk.Tk()
-            root.attributes("-fullscreen", True)  
+            root.geometry('%dx%d+%d+%d' % (1140, 912, 1920, 0))
+            root.configure(background=_from_rgb((0, 0, 0)))
+            root.overrideredirect(True)
+            root.state("zoomed")
+            # root.attributes("-fullscreen", True)
             root.bind("<F11>", lambda event: root.attributes("-fullscreen",
                                                 not root.attributes("-fullscreen")))
             root.bind("<Escape>", lambda event: root.attributes("-fullscreen", False))
@@ -305,21 +312,26 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             def get_colour(index):
                 colours = [_from_rgb(tuple([i if j == index else 0 for j in range(3)])) for i in range(0, 256, step_size)]
                 values = [tuple([i if j == index else 0 for j in range(3)]) for i in range(0, 256, step_size)]
-                while True:
-                    for c, v in zip(colours, values):
-                        yield c, v
+                for c, v in zip(colours, values):
+                    yield c, v
+                yield None
             def start():
-                color, value = next(colour_getter)
+                out = next(colour_getter)
+                if out is None:
+                    return
+                color, value = out
                 root.configure(background=color) # set the colour to the next colour generated
-                print(value)
+                time.sleep(self.sleep_time)
                 record_power(value[led % 3])
                 root.after(self.sleep_time * 1000, start) # unit is milliseconds
             
             colour_getter = get_colour(led % 3)
-            startButton = tk.Button(root,text="START",command=start)
-            startButton.pack()
 
+            start()
             root.mainloop()
+            # startButton = tk.Button(root,text="START",command=start)
+            # startButton.pack()
+
 
 def run_gamma_calibration(gui, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
