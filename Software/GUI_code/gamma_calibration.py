@@ -54,7 +54,7 @@ class CalibrateProjector(ABC):
         self.instrum = self.getInstrument() if not debug else None
 
     
-    def createSequenceFile(self, led, control, level, mode='RGB'):
+    def createSequenceFile(self, led, control, level, current=100, mode='RGB'):
         if mode == 'RGB':
             mapping = [6, 4, 2]
         else: 
@@ -65,9 +65,9 @@ class CalibrateProjector(ABC):
             for j in range(8):
                 for i in range(3):
                     if i == led and j == level:
-                        file.write(f"1, {float(control * 100)}, 100, {mapping[i]}\n")
+                        file.write(f"1, {float(control * 100)}, {current}, {mapping[i]}\n")
                     else:
-                        file.write(f"1, 0, 100, {mapping[i]}\n") # set other rows to 0
+                        file.write(f"1, 0, {current}, {mapping[i]}\n") # set other rows to 0
     
     def configureLogger(self):
         log_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
@@ -117,12 +117,13 @@ class CalibrateProjector(ABC):
     #     self.sendSequenceTable()
 
 
-    def setUpPlot(self, led, level, setpoint):
+    def setUpPlot(self, led, level, setpoint, isCurrent=False):
         plt.ion()
         fig = plt.figure(layout='constrained')
         gs = GridSpec(4, 2, figure=fig)
         controlvspower = fig.add_subplot(gs[0:2, 0])
-        controlvspower.set_xlabel('Control')
+        name = 'Current' if isCurrent else 'PWM'
+        controlvspower.set_xlabel(name)
         controlvspower.set_ylabel('Power')
         line, = controlvspower.plot([], [], marker='o', linestyle='')
 
@@ -133,7 +134,7 @@ class CalibrateProjector(ABC):
 
         timevcontrol = fig.add_subplot(gs[0, 1])
         timevcontrol.set_xlabel('Time')
-        timevcontrol.set_ylabel('Control')
+        timevcontrol.set_ylabel(name)
         line3, = timevcontrol.plot([], [], marker='o', linestyle='-', color='orange')
 
         timevp = fig.add_subplot(gs[1, 1])
@@ -184,11 +185,12 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         self.max_powers = None if self.debug else self.grab_all_max_powers(gui) # what do we want the max led intensity to be?
         print(self.max_powers)
 
-        # for led in range(start_led, 6):
-        for led in [0]:
+        for led in [0, 3, 4, 5]:
+        # for led in [0]:
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             set_points = [self.max_powers[led] * level/128 for level in self.levels]
+            last_control = 0
             for i, level in enumerate(self.levels[start_level:]):
                 self.setUpPlot(led, level, set_points[i])
 
@@ -213,7 +215,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                         if led > 2:
                             self.createSequenceFile(led % 3, control, i, mode='OCV')
                         else:
-                            self.createSequenceFile(led, control, i)
+                            self.createSequenceFile(led % 3, control, i)
                         seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename) # load the sequence
                         seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename) # load the sequence
                         gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
@@ -234,14 +236,71 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     itr = itr + 1
                     # stop the pid loop if the power is within the signficant digits of the settings
                     # self.threshold = 10**(-i-1)
-                    if abs(pid.setpoint - power) < self.threshold or itr > 250 or power < 1.75:
+                    if abs(pid.setpoint - power) < self.threshold:
                         logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
+                        break
+
+                    if itr > 100 and abs(control - last_control) < float(1/65535): 
+                        logging.info(f'Gamma calibration for led {led} level {level} did not finish - Control: {control} Power: {power}')
+                        self.run_finetune_current_calibration(gui, control, led, i)
                         break
 
                 # Save the figure in the data directory
                 self.writeControlPowerData(led, level, control, power)
                 self.fig.savefig(os.path.join(self.plot_dirname, f'gamma_calibration_{led}_{level}.png'))
                 plt.close(self.fig)
+
+    def run_finetune_current_calibration(self, gui, last_pwm_control, led, start_level=0):
+        set_points = [self.max_powers[led] * level/128 for level in self.levels]
+        for i, level in enumerate(self.levels[start_level:]):
+            self.setUpPlot(led, level, set_points[i], isCurrent=True)
+
+            # configure PID to the settings in simulation, set the set_point to the intended power level
+            pid = PID(0.00139, 0.2 * (2**i), 0.00000052, setpoint=set_points[i], sample_time=None)
+            pid.output_limits = (0, 1)
+
+            start_time = time.time()
+            power = 0.0
+            itr = 0
+            while True:
+                control = pid(power, dt=0.01)
+                # send control level to the driver
+                if self.debug:
+                    power = float(250/(2**i)*np.sqrt(control))
+                else:
+                    # control the CURRENT instead of the PWM in order to get a step down at lower bits
+                    if led > 2:
+                        self.createSequenceFile(led % 3, last_pwm_control, i, current=control, mode='OCV')
+                    else:
+                        self.createSequenceFile(led % 3, last_pwm_control, i, current=control)
+                    seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename) # load the sequence
+                    seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename) # load the sequence
+                    gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
+
+                    # wait for the sequence to load, and change, and measure
+                    time.sleep(self.sleep_time)
+
+                    # measure the power meter
+                    power = self.instrum.read * 1000000.0 # convert to microwatts
+                    print(control, power, set_points[i])
+
+                # write the data out to a file
+                elapsed_time = time.time() - start_time
+                p, intg, d = pid.components
+                self.writePIDData(level, set_points[i], elapsed_time, power, p, intg, d, control)
+                self.plotPIDData(elapsed_time, power, p, intg, d, control)
+
+                itr = itr + 1
+                # stop the pid loop if the power is within the signficant digits of the settings
+                # self.threshold = 10**(-i-1)
+                if abs(pid.setpoint - power) < self.threshold or itr > 50:
+                    logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
+                    break
+
+            # Save the figure in the data directory
+            self.writeControlPowerData(led, level, control, power)
+            self.fig.savefig(os.path.join(self.plot_dirname, f'gamma_calibration_current_{led}_{level}.png'))
+            plt.close(self.fig)
 
     def grab_all_max_powers(self, gui, percent_of_max=0.8):
         max_powers = []
@@ -272,7 +331,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         return max_powers
     
 
-    def run_gamma_check(self, gui, even_filename, odd_filename, step_size=10):
+    def run_gamma_check(self, step_size=10):
 
         def record_power(control):
             power = 0 if self.debug else self.instrum.read * 1000000.0
@@ -284,13 +343,6 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             
-            # Opening another window, does not work with the GUI. 
-            # if not self.debug: 
-            #     filename = even_filename if led < 3 else odd_filename
-            #     seq.loadSequence(gui, gui.sync_digital_low_sequence_table, filename) # load the sequence
-            #     seq.loadSequence(gui, gui.sync_digital_high_sequence_table, filename) # load the sequence
-            #     gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
-
             self.gamma_check_power_filename = os.path.join(self.dirname, f'gamma_check_{led}.csv')
             with open(self.gamma_check_power_filename, 'w') as file:
                 file.write('Control,Power\n')
@@ -338,19 +390,16 @@ def run_gamma_calibration(gui, debug=False):
     calibration_dir = f'calibration_{timestamp}'
 
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
-    calibrator.run_calibration(gui, start_led=5)
+    calibrator.run_calibration(gui)
 
 
 def run_gamma_check(gui, debug=True):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    even_filename = './sequence_files/rgb_even.csv'
-    odd_filename = './sequence_files/ocv_odd.csv'
-
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
-    calibrator.run_gamma_check(gui, even_filename, odd_filename)
+    calibrator.run_gamma_check()
 
 if __name__ == "__main__":
-    # run_gamma_calibration(None, debug=True)
-    run_gamma_check(None, debug=False)
+    run_gamma_calibration(None, debug=True)
+    # run_gamma_check(None, debug=False)
