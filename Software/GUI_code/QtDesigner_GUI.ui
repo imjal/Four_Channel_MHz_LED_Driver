@@ -4875,12 +4875,12 @@ This input is clamped to 0-3.3V, and is rated for -3V to +6V max. A small negati
          </widget> -->
         </item>
         <item row="1" column="0">
-            <widget class="QPushButton" name="gamma_check_button">
+            <widget class="QPushButton" name="measure_bitmasks_button">
             <property name="toolTip">
-                <string>Run Gamma Check to Test if the Correction is linear</string>
+                <string>Run through all the bitmasks and make sure they're relatively close to the original measurements.</string>
             </property>
             <property name="text">
-                <string>Run Gamma Check</string>
+                <string>QC - Measure All Bitmasks</string>
             </property>
             </widget>
         </item>
