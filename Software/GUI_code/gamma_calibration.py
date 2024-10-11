@@ -46,7 +46,7 @@ class CalibrateProjector(ABC):
         os.makedirs(self.plot_dirname, exist_ok=True)
 
         # configure final measurement data file
-        self.final_data_filename = os.path.join(self.dirname, 'calibrated_control.csv')
+        self.final_data_filename = os.path.join(self.dirname, 'calibrated_control-measurement.csv')
         with open(self.final_data_filename, 'w') as file:
             file.write('LED,Level,PWM,Current,Power\n')
 
@@ -372,7 +372,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 self.writeControlPowerData(led, level, pwm, current, power)
     
 
-    def run_gamma_check(self, step_size=1):
+    def run_gamma_check(self, step_size=4):
 
         def record_power(control):
             power = 0 if self.debug else self.instrum.read * 1000000.0
@@ -380,7 +380,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             with open(self.gamma_check_power_filename, 'a') as file:
                 file.write(f'{control},{power},\n')
 
-        for led in [0]:
+        for led in [1]:
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             
@@ -438,7 +438,7 @@ def measure_bitmasks(gui, debug=False):
     calibration_dir = f'measure_bitmasks_{timestamp}'
 
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
-    calibrator.measure_all_bit_masks(gui, "calibration_20241008_124108\calibrated_control.csv")
+    calibrator.measure_all_bit_masks(gui, "calibration_20241010_161314\calibrated_control.csv")
 
 
 def run_gamma_check(gui, debug=True):
@@ -485,5 +485,5 @@ def create_sequence_file(dirname, calibration_csv_filename):
 
 if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
-    # run_gamma_check(None, debug=False)
-    create_sequence_file("redo_with_0_current", "calibration_20241008_124108\calibrated_control.csv")
+    run_gamma_check(None, debug=False)
+    # create_sequence_file("1010-measurement", "calibration_20241010_161314\calibrated_control.csv")
