@@ -2,7 +2,7 @@ from collections import OrderedDict
 import guiSequence as seq
 import guiConfigIO as fileIO
 import calibrationPlot as plot
-from gamma_calibration import run_gamma_calibration, measure_bitmasks
+from gamma_calibration import run_gamma_calibration, measure_bitmasks, run_gamma_calibration_finetune
 from PyQt5 import QtGui, QtCore
 
 def initializeConfigModel(gui):
@@ -330,7 +330,7 @@ def initializeEvents(gui):
         gui.sync_analog_output_current_avg_slider.valueChanged.connect(lambda: gui.updateAnalogSync("current"))
 
         gui.gamma_correction_button.clicked.connect(lambda: run_gamma_calibration(gui))
-
+        gui.finetune_calibration_button.clicked.connect(lambda: run_gamma_calibration_finetune(gui))
         gui.measure_bitmasks_button.clicked.connect(lambda: measure_bitmasks(gui))
 
         sequenceEvents()

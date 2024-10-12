@@ -9,6 +9,7 @@ import time
 from abc import ABC, abstractmethod
 import logging
 import tkinter as tk
+import concurrent.futures
 
 from simple_pid import PID
 # from pymeasure.instruments.thorlabs import ThorlabsPM100USB
@@ -109,14 +110,27 @@ class CalibrateProjector(ABC):
             raise Exception('Could not connect to Thorlabs PM100D')
         return instrum
 
+    def measure_power(self): # returns in microwatts
+        def record_power():
+            power = 0 if self.debug else self.instrum.read * 1000000.0
+            return power
+        num_tries = 5
+        while num_tries > 0: # this function is so faulty so we gotta break off a thread
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(record_power)  # Task that takes 6 seconds
+                try:
+                    # Attempt to get the result with a 5-second timeout
+                    power = future.result(timeout=5)
+                    break
+                except concurrent.futures.TimeoutError:
+                    num_tries -= 1
+                    print(f"Measurement Failed. Trying again {num_tries} more times.")
+                    self.instrum = self.getInstrument() # untested
+        return power
+
     @abstractmethod
     def run_calibration(self, gui):
         pass
-
-    # def run_gamma_check(self, gui, channel):
-    #
-    #     self.sendSequenceTable()
-
 
     def setUpPlot(self, led, level, setpoint, isCurrent=False):
         plt.ion()
@@ -182,9 +196,14 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         self.levels = levels
 
 
-    def run_calibration(self, gui, start_led=0, start_level=0):
+    def run_calibration(self, gui, start_led=0, start_level=0, calibration_csv_filename=None):
         self.max_powers = None if self.debug else self.grab_all_max_powers(gui) # what do we want the max led intensity to be?
         print(self.max_powers)
+
+        isFinetune = False
+        if calibration_csv_filename is not None:
+            isFinetune=True
+            df = pd.read_csv(calibration_csv_filename)
 
         for led in [0, 3, 4, 5]:
             if self.instrum is not None:
@@ -203,11 +222,18 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 # old PID settings, not converging fast enough due to characteristics of the percentages
                 # pid = PID(0.00139/div_fact, 0.2/div_fact, 0.00000052/div_fact, setpoint=self.set_points[i], sample_time=None)  # works in microwatts
                 # converges in 8 iterations
-                pid = PID(0.00139, 0.2 * (2**i), 0.00000052, setpoint=set_points[i], sample_time=None)
+
+                starting_out = 0
+                if isFinetune:
+                    row = df[(df['LED'] == led) & (df['Level'] == level)]
+                    starting_out = row['PWM'].item()/100
+                print(starting_out)
+                pid = PID(0.00139, 0.2 * (2**i), 0.00000052, setpoint=set_points[i], sample_time=None, starting_output=starting_out)
                 pid.output_limits = (0, 1)
 
                 start_time = time.time()
-                power = 0.0
+                self.send_led_bitmask_intensity(gui, led, i, starting_out, 1)
+                power = self.measure_power()
                 itr = 0
                 while True:
                     control = pid(power, dt=0.01)
@@ -216,19 +242,11 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                         power = float(250/(2**i)*np.sqrt(control))
                     else:
                         # send the sequence to the device
-                        if led > 2:
-                            self.createSequenceFile(led % 3, control, i, mode='OCV')
-                        else:
-                            self.createSequenceFile(led % 3, control, i)
-                        seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename) # load the sequence
-                        seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename) # load the sequence
-                        gui.ser.uploadSyncConfiguration() # upload the sequence to the driver
-
-                        # wait for the sequence to load, and change, and measure
-                        time.sleep(self.sleep_time)
+                        self.send_led_bitmask_intensity(gui, led, i, control, 1)
 
                         # measure the power meter
-                        power = self.instrum.read * 1000000.0 # convert to microwatts
+                        power = self.measure_power()
+                        # power = self.instrum.read * 1000000.0 # convert to microwatts
                         print(control, power, set_points[i])
 
                     # write the data out to a file
@@ -240,8 +258,8 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     itr = itr + 1
                     # stop the pid loop if the power is within the signficant digits of the settings
                     # self.threshold = 10**(-i-1)
-                    # if level < 8:
-                    #     self.threshold = self.threshold/10
+                    if level < 8:
+                        self.threshold = self.threshold/10
                     if abs(pid.setpoint - power) < self.threshold:
                         logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
 
@@ -251,7 +269,6 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                         plt.close(self.fig)
 
                         last_level_control = control
-
                         break
 
                     if abs(control - last_control) <= float(1/65535) and itr > 3:
@@ -259,7 +276,17 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                         self.run_finetune_current_calibration(gui, last_level_control, led, i)
                         break
 
+    def send_led_bitmask_intensity(self, gui, led, level, pwm, current):
+        if led > 2:
+            self.createSequenceFile(led % 3, pwm, level, current=current, mode='OCV')
+        else:
+            self.createSequenceFile(led % 3, pwm, level, current=current)
+        seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename)  # load the sequence
+        seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename)  # load the sequence
+        gui.ser.uploadSyncConfiguration()  # upload the sequence to the driver
 
+        # give some time for the hardware to catchup
+        time.sleep(self.sleep_time)
 
     def run_finetune_current_calibration(self, gui, last_pwm_control, led, start_level=0):
         set_points = [self.max_powers[led] * level/128 for level in self.levels]
@@ -380,7 +407,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             with open(self.gamma_check_power_filename, 'a') as file:
                 file.write(f'{control},{power},\n')
 
-        for led in [1]:
+        for led in [0]:
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             
@@ -411,11 +438,19 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             def start():
                 out = next(colour_getter)
                 if out is None:
+                    root.destroy()
                     return
                 color, value = out
                 root.configure(background=color) # set the colour to the next colour generated
                 time.sleep(self.sleep_time)
-                record_power(value[led % 3])
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(record_power, value[led % 3])  # Task that takes 6 seconds
+                    try:
+                        # Attempt to get the result with a 5-second timeout
+                        result = future.result(timeout=5)
+                    except concurrent.futures.TimeoutError:
+                        print(f"Measurement Failed at {value}. Moving on.")
+                # record_power(value[led % 3])
                 root.after(self.sleep_time * 1000, start) # unit is milliseconds
             
             colour_getter = get_colour(led % 3)
@@ -433,11 +468,19 @@ def run_gamma_calibration(gui, debug=False):
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
     calibrator.run_calibration(gui)
 
+
+def run_gamma_calibration_finetune(gui, debug=False):
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    calibration_dir = f'calibration_{timestamp}'
+
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1 )
+    calibrator.run_calibration(gui, calibration_csv_filename="calibration_20241010_161314\calibrated_control.csv")
+
 def measure_bitmasks(gui, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'measure_bitmasks_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=3)
     calibrator.measure_all_bit_masks(gui, "calibration_20241010_161314\calibrated_control.csv")
 
 
