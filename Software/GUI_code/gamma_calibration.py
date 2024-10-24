@@ -205,7 +205,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             isFinetune=True
             df = pd.read_csv(calibration_csv_filename)
 
-        for led in [0, 3, 4, 5]:
+        for led in [4, 5]:
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
 
@@ -258,8 +258,8 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     itr = itr + 1
                     # stop the pid loop if the power is within the signficant digits of the settings
                     # self.threshold = 10**(-i-1)
-                    if level < 8:
-                        self.threshold = self.threshold/10
+                    # if level < 8:
+                    #     self.threshold = self.threshold/10
                     if abs(pid.setpoint - power) < self.threshold:
                         logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
 
@@ -374,7 +374,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         df = pd.read_csv(filename)
         max_powers = []
 
-        for led in [0, 3, 4, 5]:
+        for led in [0, 1, 2, 3]:
             for j in range(8):
                 level =  2 ** (8 - j - 1)
                 row = df[(df['LED'] == led) & (df['Level'] ==level)]
@@ -481,7 +481,7 @@ def measure_bitmasks(gui, debug=False):
     calibration_dir = f'measure_bitmasks_{timestamp}'
 
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=3)
-    calibrator.measure_all_bit_masks(gui, "calibration_20241010_161314\calibrated_control.csv")
+    calibrator.measure_all_bit_masks(gui, "calibration_20241023_164950\calibrated_control-measurement.csv")
 
 
 def run_gamma_check(gui, debug=True):
@@ -497,7 +497,7 @@ def create_sequence_file(dirname, calibration_csv_filename):
     df = pd.read_csv(calibration_csv_filename)
 
     led_rows = []
-    for i in [0, 3, 4, 5]:
+    for i in [0, 1, 2, 3]:
         led_rows += [df['LED'] == i]
 
     mapping = [6, 4, 2]
@@ -525,8 +525,41 @@ def create_sequence_file(dirname, calibration_csv_filename):
                 except:
                     import pdb; pdb.set_trace()
 
+def create_sequence_file_rgbo(dirname, calibration_csv_filename):
+    os.makedirs(dirname, exist_ok=True)
+    df = pd.read_csv(calibration_csv_filename)
+
+    led_rows = []
+    for i in [0, 1, 2, 3]:
+        led_rows += [df['LED'] == i]
+
+    mapping = [6, 4, 2]
+    even_filename = os.path.join(dirname, "rgb.csv")
+    with open(even_filename, 'w') as file:
+        file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
+        for j in range(8):
+            for i in range(3):
+                row = df[(df['LED'] == i) & (df['Level'] == 2 ** (8 - j - 1))]
+                try:
+                    file.write(f"1, {float(row['PWM'].item())}, {row['Current'].item()}, {mapping[i]}\n")
+                except:
+                    import pdb; pdb.set_trace()
+
+    mapping = [5, 3, 1]
+    even_filename = os.path.join(dirname, "ocv.csv")
+    with open(even_filename, 'w') as file:
+        file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
+        for j in range(8):
+            for i in range(3, 6):
+                if i == 0:
+                    row = df[(df['LED'] == i) & (df['Level'] == 2 ** (8 - j - 1))]
+                    file.write(f"1, {float(row['PWM'].item())}, {row['Current'].item()}, {mapping[i-3]}\n")
+
+                else:
+                    file.write(f"1, {0}, {0}, {mapping[i-3]}\n")
+
 
 if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
-    run_gamma_check(None, debug=False)
-    # create_sequence_file("1010-measurement", "calibration_20241010_161314\calibrated_control.csv")
+    # run_gamma_check(None, debug=False)
+    create_sequence_file_rgbo("1023-measurement", "calibration_20241023_164950\calibrated_control-measurement.csv")
