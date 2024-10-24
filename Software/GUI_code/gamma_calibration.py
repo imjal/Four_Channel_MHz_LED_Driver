@@ -205,7 +205,8 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             isFinetune=True
             df = pd.read_csv(calibration_csv_filename)
 
-        for led in [4, 5]:
+        for led in [0, 1, 2, 3]:
+
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
 
@@ -397,7 +398,68 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 # measure the power meter
                 power = self.instrum.read * 1000000.0
                 self.writeControlPowerData(led, level, pwm, current, power)
-    
+
+    # def run_spectral_measurement(self):
+    #     def record_power(control):
+    #         power = 0 if self.debug else self.instrum.read * 1000000.0
+    #         print(f"{control}, {power}")
+    #         with open(self.gamma_check_power_filename, 'a') as file:
+    #             file.write(f'{control},{power},\n')
+    #
+    #     for led in [0, 1, 2, 3]:
+    #         if self.instrum is not None:
+    #             self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+    #
+    #         self.gamma_check_power_filename = os.path.join(self.dirname, f'gamma_check_{led}.csv')
+    #         with open(self.gamma_check_power_filename, 'w') as file:
+    #             file.write('Control,Power\n')
+    #
+    #         # Create main window
+    #         root = tk.Tk()
+    #         root.geometry('%dx%d+%d+%d' % (1140, 912, 1920, 0))
+    #         root.configure(background=_from_rgb((0, 0, 0)))
+    #         root.overrideredirect(True)
+    #         root.state("zoomed")
+    #         # root.attributes("-fullscreen", True)
+    #         root.bind("<F11>", lambda event: root.attributes("-fullscreen",
+    #                                                          not root.attributes("-fullscreen")))
+    #         root.bind("<Escape>", lambda event: root.attributes("-fullscreen", False))
+    #         # root.geometry("500x500+200+200")
+    #         root.title("Gamma Calibration Screen")
+    #         root.resizable(width=False, height=False)
+    #
+    #         def get_colour(index):
+    #             colours = [_from_rgb(tuple([i if j == index else 0 for j in range(3)])) for i in
+    #                        [255]]
+    #             values = [tuple([i if j == index else 0 for j in range(3)]) for i in  [255]]
+    #             for c, v in zip(colours, values):
+    #                 yield c, v
+    #             yield None
+    #
+    #         def start():
+    #             out = next(colour_getter)
+    #             if out is None:
+    #                 root.destroy()
+    #                 return
+    #             color, value = out
+    #             root.configure(background=color)  # set the colour to the next colour generated
+    #             time.sleep(self.sleep_time)
+    #             with concurrent.futures.ThreadPoolExecutor() as executor:
+    #                 future = executor.submit(record_power, value[led % 3])  # Task that takes 6 seconds
+    #                 try:
+    #                     # Attempt to get the result with a 5-second timeout
+    #                     result = future.result(timeout=5)
+    #                 except concurrent.futures.TimeoutError:
+    #                     print(f"Measurement Failed at {value}. Moving on.")
+    #             # record_power(value[led % 3])
+    #             root.after(self.sleep_time * 1000, start)  # unit is milliseconds
+    #
+    #         colour_getter = get_colour(led % 3)
+    #
+    #         start()
+    #         root.mainloop()
+    #         startButton = tk.Button(root,text="START",command=start)
+    #         startButton.pack()
 
     def run_gamma_check(self, step_size=4):
 
@@ -484,6 +546,7 @@ def measure_bitmasks(gui, debug=False):
     calibrator.measure_all_bit_masks(gui, "calibration_20241023_164950\calibrated_control-measurement.csv")
 
 
+
 def run_gamma_check(gui, debug=True):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'measurement_{timestamp}'
@@ -491,8 +554,15 @@ def run_gamma_check(gui, debug=True):
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=2)
     calibrator.run_gamma_check()
 
+def run_spectral_measurement(gui, debug=True):
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    calibration_dir = f'spectral_measurement_{timestamp}'
 
-def create_sequence_file(dirname, calibration_csv_filename):
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=2)
+    calibrator.run_spectral_measurement()
+
+
+def create_sequence_file_rocv(dirname, calibration_csv_filename):
     os.makedirs(dirname, exist_ok=True)
     df = pd.read_csv(calibration_csv_filename)
 
@@ -563,3 +633,5 @@ if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
     # run_gamma_check(None, debug=False)
     create_sequence_file_rgbo("1023-measurement", "calibration_20241023_164950\calibrated_control-measurement.csv")
+    # run_spectral_measurement(None, debug=False)
+
