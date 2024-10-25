@@ -4885,6 +4885,16 @@ This input is clamped to 0-3.3V, and is rated for -3V to +6V max. A small negati
             </widget>
         </item>
         <item row="2" column="0">
+            <widget class="QPushButton" name="finetune_specific_mask">
+            <property name="toolTip">
+                <string>Finetune a particular mask</string>
+            </property>
+            <property name="text">
+                <string>Run Finetune Calibration on a Specific Mask </string>
+            </property>
+            </widget>
+        </item>
+        <item row="3" column="0">
             <widget class="QPushButton" name="measure_bitmasks_button">
             <property name="toolTip">
                 <string>Run through all the bitmasks and make sure they're relatively close to the original measurements.</string>

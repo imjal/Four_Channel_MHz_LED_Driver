@@ -47,7 +47,7 @@ class CalibrateProjector(ABC):
         os.makedirs(self.plot_dirname, exist_ok=True)
 
         # configure final measurement data file
-        self.final_data_filename = os.path.join(self.dirname, 'calibrated_control-measurement.csv')
+        self.final_data_filename = os.path.join(self.dirname, 'calibrated_control.csv')
         with open(self.final_data_filename, 'w') as file:
             file.write('LED,Level,PWM,Current,Power\n')
 
@@ -195,6 +195,84 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         levels.reverse()
         self.levels = levels
 
+    def finetune_specific_mask(self, gui, led, level, calibration_csv_filename=None):
+        set_point = 0
+        isFinetune = False
+        if calibration_csv_filename is not None:
+            isFinetune = True
+            df = pd.read_csv(calibration_csv_filename)
+            row = df[(df['LED'] == led) & (df['Level'] == level*2)]
+            set_point = row['Power'].item() /2
+
+        if self.instrum is not None:
+            self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+
+        # set_points = [self.max_powers[led] * level / 128 for level in self.levels]
+        last_control = 0
+        last_level_control = 0
+        i = self.levels.index(level)
+        self.setUpPlot(led, level, set_point)
+
+        # configure PID to the settings in simulation, set the set_point to the intended power level
+        div_fact = np.clip(2 ** (i - 1), 1, None)
+
+
+        starting_out = 0
+        if isFinetune:
+            row = df[(df['LED'] == led) & (df['Level'] == level)]
+            starting_out = row['PWM'].item() / 100
+        print(starting_out)
+        pid = PID(0.00139, 0.2 * (2 ** i), 0.000000052, setpoint=set_point, sample_time=None,
+                  starting_output=starting_out)
+        pid.output_limits = (0, 1)
+
+        start_time = time.time()
+        self.send_led_bitmask_intensity(gui, led, i, starting_out, 1)
+        power = self.measure_power()
+        itr = 0
+        while True:
+            control = pid(power, dt=0.01)
+            # send control level to the driver
+            if self.debug:
+                power = float(250 / (2 ** i) * np.sqrt(control))
+            else:
+                # send the sequence to the device
+                self.send_led_bitmask_intensity(gui, led, i, control, 1)
+
+                # measure the power meter
+                power = self.measure_power()
+                # power = self.instrum.read * 1000000.0 # convert to microwatts
+                print(control, power, set_point)
+
+            # write the data out to a file
+            elapsed_time = time.time() - start_time
+            p, intg, d = pid.components
+            self.writePIDData(level, set_point, elapsed_time, power, p, intg, d, control)
+            self.plotPIDData(elapsed_time, power, p, intg, d, control)
+
+            itr = itr + 1
+            # stop the pid loop if the power is within the signficant digits of the settings
+            # self.threshold = 10**(-i-1)
+            # if level < 8:
+            #     self.threshold = self.threshold/10
+            if abs(pid.setpoint - power) < self.threshold:
+                logging.info(
+                    f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
+
+                # Save the figure in the data directory, needs to be here cuz the other one calls another function
+                self.writeControlPowerData(led, level, control * 100, 1 * 100, power)
+                self.fig.savefig(os.path.join(self.plot_dirname, f'gamma_calibration_{led}_{level}.png'))
+                plt.close(self.fig)
+
+                last_level_control = control
+                break
+
+            if abs(control - last_control) <= float(1 / 65535) and itr > 3:
+                logging.info(
+                    f'Gamma calibration for led {led} level {level} did not finish - Control: {control}, Power: {power}')
+                self.run_finetune_current_calibration(gui, last_level_control, led, i)
+                break
+
 
     def run_calibration(self, gui, start_led=0, start_level=0, calibration_csv_filename=None):
         self.max_powers = None if self.debug else self.grab_all_max_powers(gui) # what do we want the max led intensity to be?
@@ -205,7 +283,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             isFinetune=True
             df = pd.read_csv(calibration_csv_filename)
 
-        for led in [4, 5]:
+        for led in [3, 4, 5]:
 
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
@@ -522,7 +600,6 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             # startButton = tk.Button(root,text="START",command=start)
             # startButton.pack()
 
-
 def run_gamma_calibration(gui, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
@@ -535,15 +612,22 @@ def run_gamma_calibration_finetune(gui, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1 )
-    calibrator.run_calibration(gui, calibration_csv_filename="calibration_20241010_161314\calibrated_control.csv")
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.02)
+    calibrator.run_calibration(gui, calibration_csv_filename="calibration_20241023_164950\calibrated_control.csv")
+
+def run_finetune_specific_mask(gui, debug=False):
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    calibration_dir = f'calibration_{timestamp}'
+
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.02)
+    calibrator.finetune_specific_mask(gui, 2, 1, calibration_csv_filename="calibration_20241025_114932\calibrated_control.csv")
 
 def measure_bitmasks(gui, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'measure_bitmasks_{timestamp}'
 
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=3)
-    calibrator.measure_all_bit_masks(gui, "calibration_20241023_164950\calibrated_control.csv")
+    calibrator.measure_all_bit_masks(gui, "calibration_20241025_114932\calibrated_control.csv")
 
 
 
@@ -624,15 +708,47 @@ def create_sequence_file_rgbo(dirname, calibration_csv_filename):
                 if i == 0:
                     row = df[(df['LED'] == i) & (df['Level'] == 2 ** (8 - j - 1))]
                     file.write(f"1, {float(row['PWM'].item())}, {row['Current'].item()}, {mapping[i-3]}\n")
-  
+
                 else:
                     file.write(f"1, {0}, {0}, {mapping[i-3]}\n")
 
+def create_sequence_file_rgbocv(dirname, calibration_csv_filename):
+    os.makedirs(dirname, exist_ok=True)
+    df = pd.read_csv(calibration_csv_filename)
+
+    led_rows = []
+    for i in [0, 1, 2, 3]:
+        led_rows += [df['LED'] == i]
+
+    mapping = [6, 4, 2]
+    even_filename = os.path.join(dirname, "rgb.csv")
+    with open(even_filename, 'w') as file:
+        file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
+        for j in range(8):
+            for i in range(3):
+                row = df[(df['LED'] == i) & (df['Level'] == 2 ** (8 - j - 1))]
+                try:
+                    file.write(f"1, {float(row['PWM'].item())}, {row['Current'].item()}, {mapping[i]}\n")
+                except:
+                    import pdb; pdb.set_trace()
+
+    mapping = [5, 3, 1]
+    even_filename = os.path.join(dirname, "ocv.csv")
+    with open(even_filename, 'w') as file:
+        file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
+        for j in range(8):
+            for i in range(3, 6):
+                row = df[(df['LED'] == i) & (df['Level'] == 2 ** (8 - j - 1))]
+                try:
+                    file.write(f"1, {float(row['PWM'].item())}, {row['Current'].item()}, {mapping[i-3]}\n")
+                except:
+                    import pdb; pdb.set_trace()
 
 if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
-    run_gamma_check(None, debug=False)
-    # create_sequence_file_rgbo("1023-measurement", "calibration_20241023_164950\calibrated_control.csv")
-    # create_sequence_file_rocv("1024-rocv-calibration", "calibration_20241023_164950\calibrated_control.csv")
-    # run_spectral_measurement(None, debug=False)
+    # run_gamma_check(None, debug=False)
+    # create_sequence_file_rgbo("1025-rgbocv", "calibration_20241025_114932\calibrated_control.csv")
+    # create_sequence_file_rocv("1025-rocv", "calibration_20241025_114932\calibrated_control.csv")
+    # # run_spectral_measurement(None, debug=False)
+    create_sequence_file_rgbocv("1025-rgbocv", "calibration_20241025_114932\calibrated_control.csv")
 
