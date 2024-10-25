@@ -539,6 +539,65 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
     #         startButton = tk.Button(root,text="START",command=start)
     #         startButton.pack()
 
+    def show_specific_tuple(self): 
+        # Function to apply new color based on input RGB tuple
+
+        # Main window setup
+        root = tk.Tk()
+        root.geometry('%dx%d+%d+%d' % (1140, 912, 1920, 0))
+        root.configure(background=_from_rgb((0, 0, 0)))
+        root.overrideredirect(True)
+        root.state("zoomed")
+        root.bind("<F11>", lambda event: root.attributes("-fullscreen",
+                                                        not root.attributes("-fullscreen")))
+        root.bind("<Escape>", lambda event: root.attributes("-fullscreen", False))
+        root.title("Gamma Calibration Screen")
+        root.resizable(width=False, height=False)
+
+        def apply_color():
+            try:
+                r = int(entry_r.get())
+                g = int(entry_g.get())
+                b = int(entry_b.get())
+                
+                # Ensure RGB values are within the valid range
+                if 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255:
+                    color = _from_rgb((r, g, b))
+                    root.configure(background=color)
+                else:
+                    print("Error: RGB values must be between 0 and 255.")
+            except ValueError:
+                print("Error: Please enter valid integers for RGB values.")
+
+        # Create a secondary window for RGB input
+        def open_rgb_window():
+            rgb_window = tk.Toplevel(root)
+            rgb_window.title("Set Background Color")
+            rgb_window.geometry("300x150")
+
+            # Labels and Entry fields for RGB
+            tk.Label(rgb_window, text="R:").grid(row=0, column=0, padx=10, pady=5)
+            tk.Label(rgb_window, text="G:").grid(row=1, column=0, padx=10, pady=5)
+            tk.Label(rgb_window, text="B:").grid(row=2, column=0, padx=10, pady=5)
+
+            global entry_r, entry_g, entry_b
+            entry_r = tk.Entry(rgb_window, width=10)
+            entry_g = tk.Entry(rgb_window, width=10)
+            entry_b = tk.Entry(rgb_window, width=10)
+
+            entry_r.grid(row=0, column=1, padx=10, pady=5)
+            entry_g.grid(row=1, column=1, padx=10, pady=5)
+            entry_b.grid(row=2, column=1, padx=10, pady=5)
+
+            # Button to apply the color
+            apply_button = tk.Button(rgb_window, text="Apply Color", command=apply_color)
+            apply_button.grid(row=3, column=0, columnspan=2, pady=10)
+
+        # Open the RGB input window
+        open_rgb_window()
+        root.mainloop()
+    
+
     def run_gamma_check(self, step_size=1):
 
         def record_power(control):
@@ -637,6 +696,14 @@ def run_gamma_check(gui, debug=True):
 
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=2)
     calibrator.run_gamma_check()
+
+
+def run_specific_rgb(gui, debug=True):
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    calibration_dir = f'tmp'
+
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug)
+    calibrator.show_specific_tuple()
 
 def run_spectral_measurement(gui, debug=True):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -747,8 +814,9 @@ def create_sequence_file_rgbocv(dirname, calibration_csv_filename):
 if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
     # run_gamma_check(None, debug=False)
+    run_specific_rgb(None, debug=True)
     # create_sequence_file_rgbo("1025-rgbocv", "calibration_20241025_114932\calibrated_control.csv")
     # create_sequence_file_rocv("1025-rocv", "calibration_20241025_114932\calibrated_control.csv")
     # # run_spectral_measurement(None, debug=False)
-    create_sequence_file_rgbocv("1025-rgbocv", "calibration_20241025_114932\calibrated_control.csv")
+    # create_sequence_file_rgbocv("1025-rgbocv", "calibration_20241025_114932\calibrated_control.csv")
 
