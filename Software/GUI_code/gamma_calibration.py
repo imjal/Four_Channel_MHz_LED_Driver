@@ -205,7 +205,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             isFinetune=True
             df = pd.read_csv(calibration_csv_filename)
 
-        for led in [0, 1, 2, 3]:
+        for led in [4, 5]:
 
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
@@ -375,7 +375,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         df = pd.read_csv(filename)
         max_powers = []
 
-        for led in [0, 1, 2, 3]:
+        for led in [0, 1, 2, 3, 4, 5]:
             for j in range(8):
                 level =  2 ** (8 - j - 1)
                 row = df[(df['LED'] == led) & (df['Level'] ==level)]
@@ -461,7 +461,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
     #         startButton = tk.Button(root,text="START",command=start)
     #         startButton.pack()
 
-    def run_gamma_check(self, step_size=4):
+    def run_gamma_check(self, step_size=1):
 
         def record_power(control):
             power = 0 if self.debug else self.instrum.read * 1000000.0
@@ -469,7 +469,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             with open(self.gamma_check_power_filename, 'a') as file:
                 file.write(f'{control},{power},\n')
 
-        for led in [0]:
+        for led in [0, 1, 2]:
             if self.instrum is not None:
                 self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
             
@@ -543,7 +543,7 @@ def measure_bitmasks(gui, debug=False):
     calibration_dir = f'measure_bitmasks_{timestamp}'
 
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=3)
-    calibrator.measure_all_bit_masks(gui, "calibration_20241023_164950\calibrated_control-measurement.csv")
+    calibrator.measure_all_bit_masks(gui, "calibration_20241023_164950\calibrated_control.csv")
 
 
 
@@ -624,14 +624,15 @@ def create_sequence_file_rgbo(dirname, calibration_csv_filename):
                 if i == 0:
                     row = df[(df['LED'] == i) & (df['Level'] == 2 ** (8 - j - 1))]
                     file.write(f"1, {float(row['PWM'].item())}, {row['Current'].item()}, {mapping[i-3]}\n")
-
+  
                 else:
                     file.write(f"1, {0}, {0}, {mapping[i-3]}\n")
 
 
 if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
-    # run_gamma_check(None, debug=False)
-    create_sequence_file_rgbo("1023-measurement", "calibration_20241023_164950\calibrated_control-measurement.csv")
+    run_gamma_check(None, debug=False)
+    # create_sequence_file_rgbo("1023-measurement", "calibration_20241023_164950\calibrated_control.csv")
+    # create_sequence_file_rocv("1024-rocv-calibration", "calibration_20241023_164950\calibrated_control.csv")
     # run_spectral_measurement(None, debug=False)
 
