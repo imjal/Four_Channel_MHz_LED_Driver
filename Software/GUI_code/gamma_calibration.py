@@ -612,14 +612,6 @@ def run_gamma_check(gui, debug=True):
     calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1, sleep_time=2)
     calibrator.run_gamma_check()
 
-
-def run_specific_rgb(gui, debug=True):
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    calibration_dir = f'tmp'
-
-    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug)
-    calibrator.show_specific_tuple()
-
 def run_spectral_measurement(gui, debug=True):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'spectral_measurement_{timestamp}'
@@ -729,7 +721,6 @@ def create_sequence_file_rgbocv(dirname, calibration_csv_filename):
 if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
     # run_gamma_check(None, debug=False)
-    run_specific_rgb(None, debug=False)
     # create_sequence_file_rgbo("1025-rgbocv", "calibration_20241025_114932\calibrated_control.csv")
     # create_sequence_file_rocv("1025-rocv", "calibration_20241025_114932\calibrated_control.csv")
     # # run_spectral_measurement(None, debug=False)
