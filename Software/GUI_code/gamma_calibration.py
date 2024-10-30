@@ -12,10 +12,8 @@ import tkinter as tk
 import concurrent.futures
 
 from simple_pid import PID
-# from pymeasure.instruments.thorlabs import ThorlabsPM100USB
-import pyvisa
 from ThorlabsPM100 import ThorlabsPM100
-
+from newport import Newport_1918c
 import guiSequence as seq
 
 
@@ -70,6 +68,18 @@ class CalibrateProjector(ABC):
                         file.write(f"1, {float(control * 100)}, {current * 100}, {mapping[i]}\n")
                     else:
                         file.write(f"1, 0, 0, {mapping[i]}\n") # set other rows to 0
+
+    def createAllOnSequenceFile(self, mode='RGB'):
+        if mode == 'RGB':
+            mapping = [6, 4, 2]
+        else:
+            mapping = [5, 3, 1]
+        with open(self.seq_filename, 'w') as file:
+            file.write("LED #,LED PWM (%),LED current (%),Duration (s)\n")
+
+            for j in range(8):
+                for i in range(3):
+                    file.write(f"1, 100, 100, {mapping[i]}\n")
     
     def configureLogger(self):
         log_filename = os.path.join(self.dirname, datetime.now().strftime('gamma_calibration_%Y%m%d_%H%M%S.log'))
@@ -96,23 +106,32 @@ class CalibrateProjector(ABC):
             file.write(f'{led},{level},{pwm},{current},{power}\n')
 
     def getInstrument(self):
-        try:
-            # theresa_device_id ='USB0::4883::32888::P0015224::0::INSTR'
-            # will_device_id = 'USB0::0x1313::0x8078::P0015224::INSTR'
-            # instrum = ThorlabsPM100USB(will_device_id)
-            rm = pyvisa.ResourceManager()
-            inst = rm.open_resource('USB0::0x1313::0x8078::P0015224::INSTR',
-                                    timeout=1)
-            instrum = ThorlabsPM100(inst=inst)
-            instrum.sense.average.count = 500 # take an average measurement over 100 samples
-        except:
-            logging.error('Could not connect to Thorlabs PM100D')
-            raise Exception('Could not connect to Thorlabs PM100D')
-        return instrum
 
-    def measure_power(self): # returns in microwatts
+        # Initialize a instrument object. You might have to change the LIBname or product_id.
+        nd = Newport_1918c(LIBNAME=r"C:\Program Files (x86)\Newport\Newport USB Driver\Bin\x64\usbdll.dll", product_id=0xCEC7)
+
+        if nd.status == 'Connected':
+            # Print the IDN of the newport detector.
+            print('Connected to ' + nd.ask('*IDN?'))
+            print("Make sure to use the attenuator if the output is over 4.0 mW!")
+
+            settings = {
+                'FILTer':3,
+                'DIGITALFILTER':10000,
+                'ANALOGFILTER':4,
+                'Lambda':550
+            }
+            for k, v in settings.items():
+                nd.write(f"PM:{k} {str(v)}")
+                assert (nd.ask(f"PM:{k}?") == str(v))
+            print(f"Current Temperature: {nd.ask('PM:CALTEMP?')}")
+        else:
+            print(nd.status)
+        return nd
+
+    def measure_power(self):
         def record_power():
-            power = 0 if self.debug else self.instrum.read * 1000000.0
+            power = 0 if self.debug else float(self.instrum.ask("PM:Power?")) * 1000000.0 # measure in microwatts
             return power
         num_tries = 5
         while num_tries > 0: # this function is so faulty so we gotta break off a thread
@@ -127,6 +146,9 @@ class CalibrateProjector(ABC):
                     print(f"Measurement Failed. Trying again {num_tries} more times.")
                     self.instrum = self.getInstrument() # untested
         return power
+
+    def set_instrum_wavelength(self, wavelength):
+        self.instrum.write(f"PM:Lambda {str(wavelength)}")
 
     @abstractmethod
     def run_calibration(self, gui):
@@ -205,7 +227,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             set_point = row['Power'].item() /2
 
         if self.instrum is not None:
-            self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+            self.set_instrum_wavelength(self.peak_wavelengths[led])
 
         # set_points = [self.max_powers[led] * level / 128 for level in self.levels]
         last_control = 0
@@ -241,7 +263,6 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
                 # measure the power meter
                 power = self.measure_power()
-                # power = self.instrum.read * 1000000.0 # convert to microwatts
                 print(control, power, set_point)
 
             # write the data out to a file
@@ -255,7 +276,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             # self.threshold = 10**(-i-1)
             # if level < 8:
             #     self.threshold = self.threshold/10
-            if abs(pid.setpoint - power) < self.threshold:
+            if power - pid.setpoint < self.threshold: # always finetune to the positive value
                 logging.info(
                     f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
 
@@ -283,10 +304,10 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             isFinetune=True
             df = pd.read_csv(calibration_csv_filename)
 
-        for led in [3, 4, 5]:
+        for led in [0, 1, 2, 3, 4, 5]:
 
             if self.instrum is not None:
-                self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+                self.set_instrum_wavelength(self.peak_wavelengths[led])
 
             set_points = [self.max_powers[led] * level / 128 for level in self.levels]
             last_control = 0
@@ -302,12 +323,12 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 # pid = PID(0.00139/div_fact, 0.2/div_fact, 0.00000052/div_fact, setpoint=self.set_points[i], sample_time=None)  # works in microwatts
                 # converges in 8 iterations
 
-                starting_out = 0
+                starting_out = 0.8 # start at 80% mask to get really close
                 if isFinetune:
                     row = df[(df['LED'] == led) & (df['Level'] == level)]
                     starting_out = row['PWM'].item()/100
                 print(starting_out)
-                pid = PID(0.00139, 0.2 * (2**i), 0.00000052, setpoint=set_points[i], sample_time=None, starting_output=starting_out)
+                pid = PID(0.00139, 0.2 * (2**(i + 7)), 0.00000052, setpoint=set_points[i], sample_time=None, starting_output=starting_out)
                 pid.output_limits = (0, 1)
 
                 start_time = time.time()
@@ -325,7 +346,6 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
                         # measure the power meter
                         power = self.measure_power()
-                        # power = self.instrum.read * 1000000.0 # convert to microwatts
                         print(control, power, set_points[i])
 
                     # write the data out to a file
@@ -339,7 +359,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     # self.threshold = 10**(-i-1)
                     # if level < 8:
                     #     self.threshold = self.threshold/10
-                    if abs(pid.setpoint - power) < self.threshold:
+                    if power - pid.setpoint < self.threshold: # always finetune to the positive value
                         logging.info(f'Gamma calibration for led {led} level {level} complete - Control: {control} Power: {power}')
 
                         # Save the figure in the data directory, needs to be here cuz the other one calls another function
@@ -367,6 +387,17 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
         # give some time for the hardware to catchup
         time.sleep(self.sleep_time)
 
+
+    def send_all_bitmasks_intensity(self, gui, led):
+        mode = 'RGB' if led < 3 else 'OCV'
+        self.createAllOnSequenceFile(mode=mode)
+        seq.loadSequence(gui, gui.sync_digital_low_sequence_table, self.seq_filename)  # load the sequence
+        seq.loadSequence(gui, gui.sync_digital_high_sequence_table, self.seq_filename)  # load the sequence
+        gui.ser.uploadSyncConfiguration()  # upload the sequence to the driver
+
+        # give some time for the hardware to catchup
+        time.sleep(self.sleep_time)
+
     def run_finetune_current_calibration(self, gui, last_pwm_control, led, start_level=0):
         set_points = [self.max_powers[led] * level/128 for level in self.levels]
         for i, level in enumerate(self.levels):
@@ -382,6 +413,8 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             power = 0.0
             itr = 0
             while True:
+                # keep the temperature of the system consistent
+                self.send_all_bitmasks_intensity(gui, led)
                 control = pid(power, dt=0.01)
                 # send control level to the driver
                 if self.debug:
@@ -400,7 +433,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                     time.sleep(self.sleep_time)
 
                     # measure the power meter
-                    power = self.instrum.read * 1000000.0 # convert to microwatts
+                    power = self.measure_power()
                     print(control, power, set_points[i])
 
                 # write the data out to a file
@@ -426,7 +459,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
 
         for led in range(6):
             if self.instrum is not None:
-                self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+                self.set_instrum_wavelength(self.peak_wavelengths[led])
 
             if led > 2:
                 self.createSequenceFile(led % 3, 1,0, mode='OCV')
@@ -440,16 +473,19 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
             time.sleep(self.sleep_time)
 
             # measure the power meter
-            max_powers += [self.instrum.read * 1000000.0 * percent_of_max]  # convert to microwatts
+            max_powers += [self.measure_power()]  # convert to microwatts
 
         max_power_data_file = os.path.join(self.dirname, 'max_power_data.csv')
         with open(max_power_data_file, 'w') as file:
             file.write('LED,Power\n')
             for i in range(6):
                 file.write(f'{i},{max_powers[i]}\n')
-        return max_powers
+        print(f"All Max Powers at 100% - {max_powers}")
+        max_powers_80 = [x * percent_of_max for x in max_powers]
+        return max_powers_80
 
     def measure_all_bit_masks(self, gui, filename):
+        # self.max_powers = None if self.debug else self.grab_all_max_powers(gui) # simply for data collection
         df = pd.read_csv(filename)
         max_powers = []
 
@@ -458,7 +494,7 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 level =  2 ** (8 - j - 1)
                 row = df[(df['LED'] == led) & (df['Level'] ==level)]
                 if self.instrum is not None:
-                    self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+                    self.set_instrum_wavelength(self.peak_wavelengths[led])
 
                 pwm = row['PWM'].item()
                 current = row['Current'].item()
@@ -474,20 +510,20 @@ class CalibrateEvenOdd8Bit(CalibrateProjector):
                 time.sleep(self.sleep_time)
 
                 # measure the power meter
-                power = self.instrum.read * 1000000.0
+                power = self.measure_power()
                 self.writeControlPowerData(led, level, pwm, current, power)
 
     def run_gamma_check(self, step_size=1):
 
         def record_power(control):
-            power = 0 if self.debug else self.instrum.read * 1000000.0
+            power = 0 if self.debug else self.measure_power()
             print(f"{control}, {power}")
             with open(self.gamma_check_power_filename, 'a') as file:
                 file.write(f'{control},{power},\n')
 
-        for led in [0, 1, 2]:
+        for led in [3, 4, 5]:
             if self.instrum is not None:
-                self.instrum.sense.correction.wavelength = self.peak_wavelengths[led]
+                self.set_instrum_wavelength(self.peak_wavelengths[led])
             
             self.gamma_check_power_filename = os.path.join(self.dirname, f'gamma_check_{led}.csv')
             with open(self.gamma_check_power_filename, 'w') as file:
@@ -542,7 +578,7 @@ def run_gamma_calibration(gui, debug=False):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     calibration_dir = f'calibration_{timestamp}'
 
-    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.1)
+    calibrator = CalibrateEvenOdd8Bit(gui, calibration_dir, debug=debug, threshold=0.005, sleep_time=2)
     calibrator.run_calibration(gui)
 
 
@@ -693,7 +729,7 @@ def create_sequence_file_rgbocv(dirname, calibration_csv_filename):
 if __name__ == "__main__":
     # run_gamma_calibration(None, debug=True)
     # run_gamma_check(None, debug=False)
-    run_specific_rgb(None, debug=True)
+    run_specific_rgb(None, debug=False)
     # create_sequence_file_rgbo("1025-rgbocv", "calibration_20241025_114932\calibrated_control.csv")
     # create_sequence_file_rocv("1025-rocv", "calibration_20241025_114932\calibrated_control.csv")
     # # run_spectral_measurement(None, debug=False)
